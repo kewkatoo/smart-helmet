@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Helmet - AI Safety Dashboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        
+        .stream-card {
+            background: #1e293b;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .stream-card:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .stream-feed {
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            background: #090d16;
+            position: relative;
+        }
+        
+        .stream-feed img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+        
+        .status-DANGER {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid #ef4444;
+            animation: pulse-danger 1.5s infinite;
+        }
+        
+        .status-WARNING {
+            background-color: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid #f59e0b;
+        }
+        
+        .status-SAFE {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid #10b981;
+        }
+
+        @keyframes pulse-danger {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { transform: scale(1.03); box-shadow: 0 0 20px 4px rgba(239, 68, 68, 0.6); }
+        }
+
+        .metric-card {
+            background: #1e293b;
+            border-radius: 14px;
+            padding: 1.25rem;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.2s ease;
+        }
+        
+        .metric-card:hover {
+            background: #243247;
+        }
+        
+        .metric-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-top: 0.25rem;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            min-height: 280px;
+            border-radius: 12px;
+        }
+        
+        .alert-banner {
+            display: none;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen py-6 px-4 md:px-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Top Navbar -->
+        <header class="flex flex-col md:flex-row items-center justify-between pb-6 mb-8 border-b border-gray-800">
+            <div class="flex items-center space-x-3 mb-4 md:mb-0">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-sky-400 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">
+                        <span class="gradient-text">Smart Helmet</span>
+                    </h1>
+                    <p class="text-xs text-gray-400">Intelligent Proximity & Telemetry Safety System</p>
+                </div>
+            </div>
+
+            <!-- Badges -->
+            <div class="flex flex-wrap items-center gap-3">
+                <div id="hw-badge" class="flex items-center space-x-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+                    <span id="hw-dot" class="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span>
+                    <span id="hw-text">Checking Hardware...</span>
+                </div>
+                <div id="proximity-badge" class="status-SAFE text-sm font-bold px-5 py-1.5 rounded-full transition-all">
+                    PROXIMITY: SAFE
+                </div>
+            </div>
+        </header>
+
+        <!-- Emergency Alert Banner -->
+        <div id="alert-banner" class="alert-banner mb-6 bg-red-900/50 border border-red-500 text-red-200 px-6 py-4 rounded-xl flex items-center justify-between shadow-lg shadow-red-900/30">
+            <div class="flex items-center space-x-3">
+                <img src="/static/war1.webp" onerror="this.style.display='none'" class="w-8 h-8" alt="Warning">
+                <div>
+                    <h3 class="font-bold text-red-100 text-base" id="alert-title">SAFETY WARNING TRIGGERED</h3>
+                    <p class="text-xs text-red-300" id="alert-desc">Anomalous sensor threshold detected.</p>
+                </div>
+            </div>
+            <span class="text-xs font-bold uppercase bg-red-800 px-3 py-1 rounded-md text-red-100">Action Required</span>
+        </div>
+
+        <!-- Live Vision Streams Grid -->
+        <div class="grid md:grid-cols-2 gap-6 mb-8">
+            <!-- YOLO Object Detection -->
+            <div class="stream-card p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h2 class="text-lg font-semibold text-gray-200">Real-Time Object Detection</h2>
+                    </div>
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">YOLOv8</span>
+                </div>
+                <div class="stream-feed">
+                    <img src="/yolo_feed" alt="YOLOv8 Detection Stream">
+                </div>
+            </div>
+
+            <!-- Depth Estimation -->
+            <div class="stream-card p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse"></span>
+                        <h2 class="text-lg font-semibold text-gray-200">Monocular Depth Estimation</h2>
+                    </div>
+                    <span class="text-xs font-medium px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">Depth-Anything</span>
+                </div>
+                <div class="stream-feed">
+                    <img src="/depth_feed" alt="Depth Estimation Stream">
+                </div>
+            </div>
+        </div>
+
+        <!-- Telemetry & Map Section -->
+        <div class="grid md:grid-cols-2 gap-6">
+            <!-- Interactive Map -->
+            <div class="stream-card p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                        <h2 class="text-lg font-semibold text-gray-200">GPS Live Location Tracking</h2>
+                    </div>
+                    <span class="text-xs text-gray-400" id="coords-text">Searching satellites...</span>
+                </div>
+                <div class="stream-feed flex-1">
+                    <div id="map"></div>
+                </div>
+            </div>
+
+            <!-- Sensor Telemetry Metrics -->
+            <div class="stream-card p-5 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-indigo-400"></span>
+                        <h2 class="text-lg font-semibold text-gray-200">Helmet Telemetry & Sensors</h2>
+                    </div>
+                    <span class="text-xs text-indigo-400">115200 Baud</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 flex-1">
+                    <!-- Speed Metric -->
+                    <div class="metric-card">
+                        <div class="metric-label flex items-center justify-between">
+                            <span>Vehicle Speed</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                        </div>
+                        <div class="metric-value flex items-baseline space-x-1">
+                            <span id="speed" class="text-emerald-400">0.0</span>
+                            <span class="text-xs font-normal text-gray-400">km/h</span>
+                        </div>
+                        <div class="w-full bg-gray-700 h-1.5 rounded-full mt-3 overflow-hidden">
+                            <div id="speed-bar" class="bg-emerald-400 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+
+                    <!-- MQ-3 Gas Sensor -->
+                    <div class="metric-card">
+                        <div class="metric-label flex items-center justify-between">
+                            <span>MQ-3 Alcohol / Gas</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                            </svg>
+                        </div>
+                        <div class="metric-value flex items-baseline space-x-1">
+                            <span id="mq3_value" class="text-amber-400">0</span>
+                            <span class="text-xs font-normal text-gray-400">ADC</span>
+                        </div>
+                        <div class="w-full bg-gray-700 h-1.5 rounded-full mt-3 overflow-hidden">
+                            <div id="mq3-bar" class="bg-amber-400 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+
+                    <!-- GPS Coordinates Card -->
+                    <div class="metric-card col-span-2">
+                        <div class="metric-label mb-1">Raw GPS Coordinates</div>
+                        <div class="flex items-center justify-between font-mono text-sm text-sky-400">
+                            <div>Lat: <span id="latitude" class="font-bold text-gray-200">--</span></div>
+                            <div class="text-gray-600">|</div>
+                            <div>Lon: <span id="longitude" class="font-bold text-gray-200">--</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-12 text-center text-gray-500 text-xs py-4 border-t border-gray-800">
+            <p>Smart Helmet IoT & Computer Vision Safety System &bull; Unified Release v2.0</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize Map centered at default coordinates
+        let map = L.map('map', { zoomControl: true }).setView([12.9716, 77.5946], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        let marker = L.marker([12.9716, 77.5946]).addTo(map);
+        let pathHistory = [];
+        let polyline = L.polyline([], { color: '#38bdf8', weight: 3, opacity: 0.7 }).addTo(map);
+
+        let lastLat = null;
+        let lastLon = null;
+
+        function updateMap(latStr, lonStr) {
+            const lat = parseFloat(latStr);
+            const lon = parseFloat(lonStr);
+
+            if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+                if (lat !== lastLat || lon !== lastLon) {
+                    const newLatLng = [lat, lon];
+                    marker.setLatLng(newLatLng);
+                    map.panTo(newLatLng);
+                    
+                    pathHistory.push(newLatLng);
+                    if (pathHistory.length > 50) pathHistory.shift();
+                    polyline.setLatLngs(pathHistory);
+
+                    lastLat = lat;
+                    lastLon = lon;
+                    document.getElementById('coords-text').textContent = `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+                }
+            }
+        }
+
+        async function fetchSensorData() {
+            try {
+                const response = await fetch('/sensor_data');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                document.getElementById('latitude').textContent = data.latitude || '--';
+                document.getElementById('longitude').textContent = data.longitude || '--';
+                
+                const speedVal = parseFloat(data.speed) || 0;
+                document.getElementById('speed').textContent = speedVal.toFixed(1);
+                document.getElementById('speed-bar').style.width = `${Math.min(100, (speedVal / 120) * 100)}%`;
+
+                const mq3Val = parseInt(data.mq3_value) || 0;
+                document.getElementById('mq3_value').textContent = mq3Val;
+                document.getElementById('mq3-bar').style.width = `${Math.min(100, (mq3Val / 400) * 100)}%`;
+
+                // Update Hardware status badge
+                const hwBadge = document.getElementById('hw-badge');
+                const hwDot = document.getElementById('hw-dot');
+                const hwText = document.getElementById('hw-text');
+
+                if (data.hardware_connected) {
+                    hwBadge.className = 'flex items-center space-x-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700';
+                    hwDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                    hwText.textContent = `ESP32 Connected (${data.port_name || 'COM'})`;
+                } else {
+                    hwBadge.className = 'flex items-center space-x-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-700';
+                    hwDot.className = 'w-2 h-2 rounded-full bg-indigo-400';
+                    hwText.textContent = 'Simulated / Demo Telemetry';
+                }
+
+                // Check Threshold Alerts
+                const banner = document.getElementById('alert-banner');
+                const title = document.getElementById('alert-title');
+                const desc = document.getElementById('alert-desc');
+
+                if (speedVal > 80) {
+                    banner.style.display = 'flex';
+                    title.textContent = 'HIGH SPEED WARNING';
+                    desc.textContent = `Vehicle speed exceeds safety limit (${speedVal} km/h > 80 km/h).`;
+                } else if (mq3Val > 250) {
+                    banner.style.display = 'flex';
+                    title.textContent = 'ALCOHOL / GAS DETECTED';
+                    desc.textContent = `MQ-3 Sensor level elevated (${mq3Val} ADC). Rider impairment risk.`;
+                } else {
+                    banner.style.display = 'none';
+                }
+
+                updateMap(data.latitude, data.longitude);
+            } catch (e) {
+                console.warn("Sensor fetch error:", e);
+            }
+        }
+
+        async function fetchProximityStatus() {
+            try {
+                const response = await fetch('/proximity_status');
+                if (!response.ok) return;
+                const status = (await response.text()).trim();
+                
+                const badge = document.getElementById('proximity-badge');
+                badge.textContent = `PROXIMITY: ${status}`;
+                badge.className = `status-${status} text-sm font-bold px-5 py-1.5 rounded-full transition-all`;
+            } catch (e) {
+                console.warn("Proximity fetch error:", e);
+            }
+        }
+
+        setInterval(fetchSensorData, 1000);
+        setInterval(fetchProximityStatus, 500);
+        fetchSensorData();
+        fetchProximityStatus();
+    </script>
+</body>
+</html>
